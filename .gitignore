@@ -1,0 +1,49 @@
+# Python virtual environment
+venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C++ build artifacts
+*.so
+*.o
+*.a
+*.out
+*.dll
+*.exe
+
+# Compiled files
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupiter notebook
+.ipynb_checkpoints
+
+# Logs
+*.log 

@@ -1,0 +1,7 @@
+numpy>=1.20.0
+matplotlib>=3.5.0
+pillow>=8.0.0
+pygame>=2.1.0
+noise>=1.2.2
+opensimplex>=0.4.3
+cffi>=1.15.0 
