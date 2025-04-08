@@ -141,7 +141,7 @@ def main():
                 terrain.generate_chunk(chunk_x, chunk_y)
     
     # Create the player controller
-    controller = PlayerController(terrain, pathfinder, initial_pos=start_pos)
+    controller = PlayerController(terrain, pathfinder, gui, initial_pos=start_pos)
     
     # Create the camera
     camera = Camera(x=start_pos[0], y=start_pos[1], zoom=0.5)
@@ -192,7 +192,7 @@ def main():
         minimap.update(player_pos, controller.path)
         
         # Render the terrain
-        renderer.render(camera, player_pos, controller.path)
+        renderer.render(camera, player_pos, controller.path, controller.destination)
         
         # Draw the minimap
         minimap.draw(gui.screen)

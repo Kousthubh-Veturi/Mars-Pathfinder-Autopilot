@@ -335,7 +335,7 @@ class TerrainRenderer:
         # Apply lighting to color
         return TerrainColors.get_shaded_color(base_color, light_factor)
     
-    def render(self, camera, player_pos, path=None):
+    def render(self, camera, player_pos, path=None, destination=None):
         """
         Render the visible terrain centered on the player.
         
@@ -343,6 +343,7 @@ class TerrainRenderer:
             camera (Camera): Camera instance
             player_pos (tuple): Player's position (x, y)
             path (list): List of path waypoints
+            destination (tuple): Destination position (x, y)
         """
         screen_width, screen_height = self.screen.get_size()
         
@@ -404,6 +405,20 @@ class TerrainRenderer:
         # Draw the player's position
         player_x, player_y = camera.world_to_screen(player_pos[0], player_pos[1], screen_width, screen_height)
         pygame.draw.circle(self.screen, (0, 0, 255), (int(player_x), int(player_y)), max(3, int(5 * camera.zoom)))
+        
+        # Draw the destination point if set
+        if destination:
+            dest_x, dest_y = camera.world_to_screen(destination[0], destination[1], screen_width, screen_height)
+            # Draw a larger red circle for the destination
+            pygame.draw.circle(self.screen, (255, 0, 0), (int(dest_x), int(dest_y)), max(4, int(6 * camera.zoom)))
+            # Draw an X inside the circle for better visibility
+            x_size = max(3, int(4 * camera.zoom))
+            pygame.draw.line(self.screen, (255, 255, 255), 
+                            (int(dest_x) - x_size, int(dest_y) - x_size),
+                            (int(dest_x) + x_size, int(dest_y) + x_size), 2)
+            pygame.draw.line(self.screen, (255, 255, 255), 
+                            (int(dest_x) - x_size, int(dest_y) + x_size),
+                            (int(dest_x) + x_size, int(dest_y) - x_size), 2)
         
         # Draw the path if available
         if path:
@@ -523,7 +538,11 @@ class GUI:
         
         # Render controls help
         controls_text = "Controls: WASD=Move, K=Toggle Autopilot, Scroll=Zoom"
-        self.render_text(controls_text, (10, self.height - 30))
+        self.render_text(controls_text, (10, self.height - 50))
+        
+        # Render destination help
+        click_text = "Click anywhere on the terrain to set a destination point"
+        self.render_text(click_text, (10, self.height - 30), (255, 255, 0))
     
     def update(self):
         """Update the display."""

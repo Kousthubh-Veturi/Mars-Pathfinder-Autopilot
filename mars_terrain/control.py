@@ -3,17 +3,19 @@ import time
 import math
 
 class PlayerController:
-    def __init__(self, terrain, pathfinder, initial_pos=(0, 0)):
+    def __init__(self, terrain, pathfinder, gui, initial_pos=(0, 0)):
         """
         Initialize the player controller.
         
         Args:
             terrain (TerrainGenerator): Terrain generator instance
             pathfinder (PathFinder): Pathfinder instance
+            gui (GUI): GUI instance for displaying messages
             initial_pos (tuple): Initial player position (x, y)
         """
         self.terrain = terrain
         self.pathfinder = pathfinder
+        self.gui = gui
         self.position = initial_pos
         
         # Movement parameters
@@ -134,13 +136,18 @@ class PlayerController:
         
         self.destination = destination
         
-        # Calculate initial path
-        self.calculate_path()
+        # Calculate initial path prioritizing minimal elevation changes
+        self.calculate_path(optimize_for_elevation=True)
         
         return True
     
-    def calculate_path(self):
-        """Calculate the path to the current destination."""
+    def calculate_path(self, optimize_for_elevation=True):
+        """
+        Calculate the path to the current destination.
+        
+        Args:
+            optimize_for_elevation (bool): Whether to optimize for minimal elevation changes
+        """
         if self.destination is None:
             self.path = None
             return
@@ -149,12 +156,33 @@ class PlayerController:
         start = (int(self.position[0]), int(self.position[1]))
         goal = (int(self.destination[0]), int(self.destination[1]))
         
-        self.path = self.pathfinder.a_star(start, goal)
+        # Use the PathFinder's A* algorithm with enhanced elevation-based costs
+        if optimize_for_elevation:
+            # Set a higher weight on elevation differences in the pathfinder temporarily
+            original_elevation_weight = self.pathfinder.elevation_weight
+            self.pathfinder.elevation_weight = 3.0  # Increase weight for elevation changes
+            self.path = self.pathfinder.a_star(start, goal)
+            self.pathfinder.elevation_weight = original_elevation_weight  # Restore original weight
+        else:
+            self.path = self.pathfinder.a_star(start, goal)
+            
         self.current_path_index = 0
         self.last_path_calculation = time.time()
         
         if self.path is None:
             print("No path found to destination")
+            self.gui.add_status_message("No valid path found!", (255, 0, 0))
+        else:
+            # Display the estimated path cost based on elevation changes
+            total_elevation_changes = 0
+            for i in range(len(self.path) - 1):
+                current = self.path[i]
+                next_point = self.path[i + 1]
+                current_elev = self.terrain.get_elevation(current[0], current[1])
+                next_elev = self.terrain.get_elevation(next_point[0], next_point[1])
+                total_elevation_changes += abs(current_elev - next_elev)
+            
+            self.gui.add_status_message(f"Path found! Total elevation changes: {total_elevation_changes:.1f}", (0, 255, 0))
     
     def toggle_autopilot(self):
         """Toggle autopilot mode."""
@@ -235,6 +263,8 @@ class InputHandler:
         # Mouse state
         self.mouse_down = False
         self.last_mouse_pos = (0, 0)
+        self.drag_start_time = 0
+        self.is_dragging = False
         
         # Key handling
         self.keys_pressed = {}
@@ -273,6 +303,8 @@ class InputHandler:
                 if event.button == 1:  # Left click
                     self.mouse_down = True
                     self.last_mouse_pos = event.pos
+                    self.drag_start_time = time.time()
+                    self.is_dragging = False
                     
                     # Check if click is on minimap to set destination
                     destination = self.minimap.set_destination(event.pos[0], event.pos[1])
@@ -288,13 +320,39 @@ class InputHandler:
             
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:  # Left click
+                    # If this was a short click (not a drag) and not on minimap, set destination on main view
+                    if not self.is_dragging and time.time() - self.drag_start_time < 0.2:
+                        # First check if we're NOT clicking on the minimap area
+                        if not (self.minimap.x_offset <= event.pos[0] <= self.minimap.x_offset + self.minimap.width and
+                                self.minimap.y_offset <= event.pos[1] <= self.minimap.y_offset + self.minimap.height):
+                            # Convert screen coordinates to world coordinates
+                            screen_width, screen_height = self.gui.screen.get_size()
+                            world_x, world_y = self.camera.screen_to_world(event.pos[0], event.pos[1], 
+                                                                          screen_width, screen_height)
+                            
+                            # Set destination if valid (non-obstacle)
+                            if (0 <= world_x < self.controller.terrain.width and 
+                                0 <= world_y < self.controller.terrain.height and
+                                not self.controller.terrain.is_obstacle(int(world_x), int(world_y))):
+                                
+                                destination = (int(world_x), int(world_y))
+                                self.controller.set_destination(destination)
+                                # Also update minimap
+                                self.minimap.destination = destination
+                                self.gui.add_status_message(f"Destination set: {destination}", (255, 255, 0))
+                    
                     self.mouse_down = False
+                    self.is_dragging = False
             
             elif event.type == pygame.MOUSEMOTION:
                 # Handle mouse drag for camera movement
                 if self.mouse_down:
                     dx = event.pos[0] - self.last_mouse_pos[0]
                     dy = event.pos[1] - self.last_mouse_pos[1]
+                    
+                    # If the mouse has moved more than a threshold, mark as dragging
+                    if abs(dx) > 5 or abs(dy) > 5:
+                        self.is_dragging = True
                     
                     # Move camera in the opposite direction of mouse movement
                     self.camera.move(-dx / self.camera.zoom, -dy / self.camera.zoom)

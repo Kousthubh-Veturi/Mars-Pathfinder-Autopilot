@@ -269,6 +269,8 @@ class PathFinder:
             terrain (TerrainGenerator): Terrain generator instance
         """
         self.terrain = terrain
+        # Weight factor for elevation differences in cost calculation
+        self.elevation_weight = 1.5
         
     def heuristic(self, a, b):
         """
@@ -345,9 +347,10 @@ class PathFinder:
         
         # If elevation difference is too steep, make it very costly
         if elevation_diff > self.terrain.max_elevation / 10:
-            return base_cost + elevation_diff * 10
+            return base_cost + elevation_diff * 10 * self.elevation_weight
         
-        return base_cost + elevation_diff
+        # Apply the elevation weight to emphasize elevation changes
+        return base_cost + elevation_diff * self.elevation_weight
     
     def a_star(self, start, goal):
         """
