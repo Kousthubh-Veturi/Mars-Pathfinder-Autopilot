@@ -1,0 +1,90 @@
+{
+    "terrain": {
+        "width": 15000,
+        "height": 15000,
+        "max_elevation": 250,
+        "chunk_size": 256,
+        "scale": 0.01,
+        "obstacle_prob": 0.05,
+        "octaves": 6,
+        "persistence": 0.5,
+        "lacunarity": 2.0
+    },
+    "simulation": {
+        "fullscreen": false,
+        "start_pos": [50, 50],
+        "camera": {
+            "initial_zoom": 0.5,
+            "zoom_speed": 0.1,
+            "smooth_factor": 0.1
+        },
+        "minimap": {
+            "width": 200,
+            "height": 200,
+            "position": [10, 10]
+        }
+    },
+    "display": {
+        "block_size": 5,
+        "use_lighting": true,
+        "ambient_light": 0.5,
+        "light_direction": [-1, -1],
+        "colors": {
+            "obstacle": [40, 40, 40],
+            "very_low": [173, 139, 115],
+            "low": [194, 162, 126],
+            "medium_low": [210, 180, 140],
+            "medium": [222, 192, 158],
+            "medium_high": [200, 170, 120],
+            "high": [180, 150, 100],
+            "very_high": [160, 130, 80]
+        }
+    },
+    "controls": {
+        "movement_speed": 10.0,
+        "autopilot_key": "K",
+        "exit_key": "ESCAPE",
+        "forward_key": "W",
+        "backward_key": "S",
+        "left_key": "A",
+        "right_key": "D"
+    },
+    "pathfinding": {
+        "recalculation_interval": 5.0,
+        "max_iterations": 10000,
+        "diagonal_movement": true
+    },
+    "presets": {
+        "test": {
+            "terrain": {
+                "width": 1000,
+                "height": 1000,
+                "chunk_size": 64
+            }
+        },
+        "performance": {
+            "terrain": {
+                "width": 2000,
+                "height": 2000,
+                "chunk_size": 128,
+                "octaves": 4
+            },
+            "display": {
+                "block_size": 3,
+                "use_lighting": false
+            }
+        },
+        "beautiful": {
+            "terrain": {
+                "width": 5000,
+                "height": 5000,
+                "octaves": 8,
+                "persistence": 0.6
+            },
+            "display": {
+                "block_size": 8,
+                "ambient_light": 0.4
+            }
+        }
+    }
+} 
