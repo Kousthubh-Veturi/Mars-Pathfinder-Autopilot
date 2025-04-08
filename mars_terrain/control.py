@@ -36,6 +36,13 @@ class PlayerController:
         self.path_recalculation_interval = 5.0  # seconds
         self.last_path_calculation = 0
         
+        # Pathfinding visualization
+        self.visualize_pathfinding = True
+        self.explored_cells = []
+        self.visualization_delay = 0.01  # seconds
+        self.last_visualization_time = 0
+        self.visualization_in_progress = False
+        
     def get_position(self):
         """Get the current player position."""
         return self.position
@@ -212,6 +219,20 @@ class PlayerController:
         
         return True
     
+    def visualization_step_callback(self):
+        """Callback function called after each step of the algorithm."""
+        # Store the current explored cells for visualization
+        self.explored_cells = self.pathfinder.get_explored_cells().copy()
+        
+        # Limit visualization update rate
+        current_time = time.time()
+        if current_time - self.last_visualization_time >= self.visualization_delay:
+            self.last_visualization_time = current_time
+            # Allow the main loop to render the current state
+            pygame.event.pump()
+            # Don't block the main thread with a sleep
+            # time.sleep(0.005)
+    
     def calculate_path(self, optimize_for_elevation=True):
         """
         Calculate the path to the current destination.
@@ -223,9 +244,19 @@ class PlayerController:
             self.path = None
             return
         
+        # Store that we're in the middle of path visualization
+        self.visualization_in_progress = True
+        self.explored_cells = []
+        
         # Use A* to find the path
         start = (int(self.position[0]), int(self.position[1]))
         goal = (int(self.destination[0]), int(self.destination[1]))
+        
+        # Enable visualization if requested
+        if self.visualize_pathfinding:
+            self.pathfinder.enable_visualization(self.visualization_step_callback)
+        else:
+            self.pathfinder.disable_visualization()
         
         # Use the PathFinder's A* algorithm with enhanced elevation-based costs
         if optimize_for_elevation:
@@ -236,9 +267,17 @@ class PlayerController:
             self.pathfinder.elevation_weight = original_elevation_weight  # Restore original weight
         else:
             self.path = self.pathfinder.a_star(start, goal)
+        
+        # Disable visualization after path is calculated
+        self.pathfinder.disable_visualization()
+        self.visualization_in_progress = False
             
         self.current_path_index = 0
         self.last_path_calculation = time.time()
+        
+        # Don't block the main thread with a sleep
+        # A brief moment where the explored cells are still visible before clearing
+        self.explored_cells = self.pathfinder.get_explored_cells().copy()
         
         if self.path is None:
             print("No path found to destination")
@@ -268,6 +307,25 @@ class PlayerController:
             self.calculate_path()
         
         return self.autopilot_enabled
+    
+    def toggle_pathfinding_visualization(self):
+        """Toggle visualization of the pathfinding algorithm."""
+        self.visualize_pathfinding = not self.visualize_pathfinding
+        return self.visualize_pathfinding
+    
+    def get_explored_cells(self):
+        """
+        Returns the current list of cells explored during pathfinding.
+        
+        Returns:
+            list: List of (x, y) coordinates of explored cells
+        """
+        return self.explored_cells
+    
+    def clear_visualization(self):
+        """Clear any visualization data and explored cells."""
+        self.explored_cells = []
+        self.visualization_in_progress = False
     
     def update_autopilot(self):
         """
@@ -400,31 +458,25 @@ class InputHandler:
                     current_time = time.time()
                     if current_time - self.key_cooldown.get(pygame.K_r, 0) > self.key_cooldown_time:
                         self.key_cooldown[pygame.K_r] = current_time
-                        
-                        # Toggle first-person mode in controller
                         first_person_mode = self.controller.toggle_first_person_mode()
-                        
-                        # Update GUI flag
                         self.gui.first_person_mode = first_person_mode
-                        
                         if first_person_mode:
-                            self.gui.add_status_message("First-person mode ENABLED", (0, 255, 255))
-                            # Initialize first-person camera position and direction
-                            self.first_person_camera.set_position(
-                                self.controller.position[0], 
-                                self.controller.position[1],
-                                self.controller.terrain
-                            )
-                            self.first_person_camera.set_direction(self.controller.direction)
-                            
-                            # Reset mouse lock state
-                            self.mouse_locked = False
+                            self.gui.add_status_message("First-person mode ENABLED", (0, 255, 0))
                         else:
-                            self.gui.add_status_message("First-person mode DISABLED", (255, 255, 0))
-                            # Make sure mouse is visible and not grabbed
+                            self.gui.add_status_message("Top-down mode ENABLED", (0, 255, 0))
+                            # Reset mouse lock when exiting first-person mode
+                            self.mouse_locked = False
                             pygame.mouse.set_visible(True)
                             pygame.event.set_grab(False)
-                            self.mouse_locked = False
+                
+                # Clear visualization with P key
+                if event.key == pygame.K_p:
+                    current_time = time.time()
+                    if current_time - self.key_cooldown.get(pygame.K_p, 0) > self.key_cooldown_time:
+                        self.key_cooldown[pygame.K_p] = current_time
+                        if hasattr(self.controller, 'clear_visualization'):
+                            self.controller.clear_visualization()
+                            self.gui.add_status_message("Cleared visualization", (200, 200, 200))
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Handle mouse clicks

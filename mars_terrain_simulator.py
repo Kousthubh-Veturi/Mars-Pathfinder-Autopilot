@@ -9,6 +9,7 @@ import argparse
 import sys
 import os
 import time
+import pygame
 
 from mars_terrain.terrain import TerrainGenerator, PathFinder
 from mars_terrain.gui import GUI, Camera, Minimap, TerrainRenderer, FirstPersonCamera
@@ -175,6 +176,7 @@ def main():
     gui.add_status_message("Welcome to Mars Terrain Simulator", (255, 255, 0))
     gui.add_status_message("Use WASD to move, K to toggle autopilot", (255, 255, 0))
     gui.add_status_message("Press R to toggle first-person view", (255, 255, 0))
+    gui.add_status_message("Click on terrain to set destination, P to clear visualization", (255, 255, 0))
     
     # Main simulation loop
     running = True
@@ -198,7 +200,10 @@ def main():
         # Update the minimap (always show it, even in first-person mode)
         minimap.update(player_pos, controller.path)
         
-        # Render the terrain (either first-person or top-down)
+        # Check if we're in the middle of pathfinding visualization
+        is_visualizing = hasattr(controller, 'visualization_in_progress') and controller.visualization_in_progress
+        
+        # Always render the terrain
         if gui.first_person_mode:
             # Get player elevation for first-person camera height
             player_elevation = controller.get_elevation()
@@ -216,7 +221,14 @@ def main():
             )
         else:
             # Render in top-down mode
-            renderer.render(camera, player_pos, controller.path, controller.destination)
+            # Always pass explored cells, but they'll only be shown if available
+            renderer.render(
+                camera, 
+                player_pos, 
+                controller.path, 
+                controller.destination, 
+                controller.explored_cells if hasattr(controller, 'explored_cells') else None
+            )
         
         # Draw the minimap (always visible in both modes)
         minimap.draw(gui.screen)
@@ -241,6 +253,10 @@ def main():
         
         # Update the display
         gui.update()
+        
+        # Process any pending events if we're in visualization mode to keep UI responsive
+        if is_visualizing:
+            pygame.event.pump()
         
         # Preload chunks around the player
         chunk_x = int(player_pos[0]) // terrain.chunk_size
