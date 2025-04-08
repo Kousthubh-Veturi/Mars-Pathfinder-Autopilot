@@ -63,6 +63,147 @@ class Camera:
         return world_x, world_y
 
 
+class FirstPersonCamera:
+    def __init__(self, position=(0, 0), direction=0, max_elevation=250):
+        """
+        Initialize the first-person camera.
+        
+        Args:
+            position (tuple): Initial position (x, y)
+            direction (float): Initial direction in radians (0 = positive x-axis)
+            max_elevation (int): Maximum terrain elevation for vertical positioning
+        """
+        self.position = position
+        self.direction = direction  # Direction in radians
+        self.vertical_angle = 0     # Vertical angle in radians
+        self.max_elevation = max_elevation
+        self.height_offset = 5      # Camera height above terrain
+        
+        # Field of view (in radians)
+        self.horizontal_fov = math.radians(90)
+        self.vertical_fov = math.radians(60)
+        
+        # View distance
+        self.view_distance = 50
+        
+        # Camera movement smoothing
+        self.target_position = position
+        self.target_direction = direction
+        self.target_vertical_angle = 0
+        self.smooth_factor = 0.2
+    
+    def update(self):
+        """Update camera position and orientation with smooth interpolation."""
+        # Smooth position movement
+        self.position = (
+            self.position[0] + (self.target_position[0] - self.position[0]) * self.smooth_factor,
+            self.position[1] + (self.target_position[1] - self.position[1]) * self.smooth_factor
+        )
+        
+        # Smooth direction rotation
+        angle_diff = self.target_direction - self.direction
+        # Handle angle wrapping
+        if angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        elif angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
+        
+        self.direction += angle_diff * self.smooth_factor
+        
+        # Wrap direction between 0 and 2*pi
+        self.direction %= 2 * math.pi
+        
+        # Smooth vertical angle
+        self.vertical_angle += (self.target_vertical_angle - self.vertical_angle) * self.smooth_factor
+        
+        # Clamp vertical angle to prevent looking too far up or down
+        self.vertical_angle = max(-math.pi/3, min(math.pi/3, self.vertical_angle))
+    
+    def set_position(self, x, y, terrain):
+        """
+        Set the target position and adjust height based on terrain.
+        
+        Args:
+            x (float): Target x position
+            y (float): Target y position
+            terrain (TerrainGenerator): Terrain generator to get elevation
+        """
+        self.target_position = (x, y)
+        
+        # Get current elevation at the camera position
+        elevation = terrain.get_elevation(int(x), int(y))
+        if elevation < 0:  # Handle obstacles
+            elevation = 0
+        
+        # Camera height is terrain elevation plus offset
+        self.height = elevation + self.height_offset
+    
+    def set_direction(self, direction):
+        """
+        Set the target horizontal camera direction.
+        
+        Args:
+            direction (float): Target direction in radians
+        """
+        self.target_direction = direction
+    
+    def set_vertical_angle(self, angle):
+        """
+        Set the target vertical camera angle.
+        
+        Args:
+            angle (float): Target vertical angle in radians
+        """
+        self.target_vertical_angle = max(-math.pi/3, min(math.pi/3, angle))
+    
+    def rotate(self, delta_x, delta_y):
+        """
+        Rotate the camera based on mouse movement.
+        
+        Args:
+            delta_x (float): Horizontal mouse movement
+            delta_y (float): Vertical mouse movement
+        """
+        # Rotate horizontally (around y-axis)
+        self.target_direction -= delta_x * 0.005
+        
+        # Wrap direction between 0 and 2*pi
+        self.target_direction %= 2 * math.pi
+        
+        # Rotate vertically (around x-axis)
+        self.target_vertical_angle -= delta_y * 0.005
+        
+        # Clamp vertical angle
+        self.target_vertical_angle = max(-math.pi/3, min(math.pi/3, self.target_vertical_angle))
+    
+    def get_view_ray(self, screen_x, screen_y, screen_width, screen_height):
+        """
+        Get a ray from the camera to the world for a screen pixel.
+        
+        Args:
+            screen_x (int): Screen x coordinate
+            screen_y (int): Screen y coordinate
+            screen_width (int): Screen width
+            screen_height (int): Screen height
+            
+        Returns:
+            tuple: Ray direction vector (x, y)
+        """
+        # Calculate the normalized device coordinates (-1 to 1)
+        ndc_x = (2.0 * screen_x / screen_width) - 1.0
+        ndc_y = 1.0 - (2.0 * screen_y / screen_height)
+        
+        # Convert to angles
+        angle_h = self.direction + ndc_x * (self.horizontal_fov / 2)
+        angle_v = self.vertical_angle + ndc_y * (self.vertical_fov / 2)
+        
+        # Calculate ray direction vector
+        ray_x = math.cos(angle_h) * math.cos(angle_v)
+        ray_y = math.sin(angle_h) * math.cos(angle_v)
+        
+        return (ray_x, ray_y)
+
+
 class TerrainColors:
     """Color palette for different terrain elevations and features."""
     
@@ -289,6 +430,10 @@ class TerrainRenderer:
         self.use_lighting = True
         self.light_direction = (-1, -1)  # Light coming from top-left
         self.ambient_light = 0.5  # Amount of ambient light (0.0 to 1.0)
+        
+        # Sky color for first-person mode background
+        self.sky_color = (135, 206, 235)  # Light blue
+        self.horizon_color = (225, 225, 200)  # Light yellow/tan
     
     def get_color(self, elevation, x, y, neighbors=None):
         """
@@ -430,6 +575,118 @@ class TerrainRenderer:
             if len(points) > 1:
                 pygame.draw.lines(self.screen, (0, 255, 0), False, points, max(2, int(3 * camera.zoom)))
 
+    def render_first_person(self, camera, player_pos, player_direction, player_height, path=None, destination=None):
+        """
+        Render the terrain from a first-person perspective.
+        
+        Args:
+            camera (FirstPersonCamera): First-person camera instance
+            player_pos (tuple): Player's position (x, y)
+            player_direction (float): Player's direction in radians
+            player_height (float): Player's height above the terrain
+            path (list): List of path waypoints
+            destination (tuple): Destination position (x, y)
+        """
+        screen_width, screen_height = self.screen.get_size()
+        
+        # Draw sky gradient
+        # Create a vertical gradient from sky color to horizon color
+        for y in range(screen_height // 2):
+            # Calculate interpolation factor (0 at top, 1 at horizon)
+            t = y / (screen_height / 2)
+            r = int(self.sky_color[0] * (1 - t) + self.horizon_color[0] * t)
+            g = int(self.sky_color[1] * (1 - t) + self.horizon_color[1] * t)
+            b = int(self.sky_color[2] * (1 - t) + self.horizon_color[2] * t)
+            
+            # Draw a horizontal line of the gradient color
+            pygame.draw.line(self.screen, (r, g, b), (0, y), (screen_width, y))
+        
+        # Draw ground in the bottom half of the screen
+        ground_rect = pygame.Rect(0, screen_height // 2, screen_width, screen_height // 2)
+        pygame.draw.rect(self.screen, (160, 120, 80), ground_rect)
+        
+        # Render visible terrain using raycasting
+        ray_step = 2  # Number of pixels to skip between rays for performance
+        
+        for x in range(0, screen_width, ray_step):
+            # Calculate ray direction for this column
+            ray_dir = camera.get_view_ray(x, screen_height // 2, screen_width, screen_height)
+            
+            # Cast the ray to find the first terrain intersection
+            max_dist = camera.view_distance
+            step_size = 1
+            dist = 0
+            hit = False
+            
+            cam_x, cam_y = camera.position
+            ray_x, ray_y = ray_dir
+            
+            while dist < max_dist and not hit:
+                # Calculate current position along the ray
+                pos_x = int(cam_x + ray_x * dist)
+                pos_y = int(cam_y + ray_y * dist)
+                
+                # Check if position is in bounds
+                if (0 <= pos_x < self.terrain.width and 0 <= pos_y < self.terrain.height):
+                    # Get the elevation at this position
+                    elevation = self.terrain.get_elevation(pos_x, pos_y)
+                    
+                    # Check if the ray hits the terrain
+                    if elevation >= camera.height - 2:  # Can see 2 blocks below current height
+                        hit = True
+                        
+                        # Calculate the color based on distance (for fog effect)
+                        color = TerrainColors.get_color(elevation, self.terrain.max_elevation)
+                        
+                        # Apply distance fog
+                        fog_factor = 1.0 - min(1.0, dist / max_dist)
+                        r = int(color[0] * fog_factor)
+                        g = int(color[1] * fog_factor)
+                        b = int(color[2] * fog_factor)
+                        color = (r, g, b)
+                        
+                        # Calculate perceived height based on elevation difference
+                        height_diff = elevation - camera.height
+                        screen_height_factor = -height_diff / 20 + 0.5  # 0 = horizon, 1 = bottom of screen
+                        
+                        # Map to screen coordinates
+                        screen_y = int(screen_height * (0.5 + screen_height_factor / 2))
+                        screen_y = max(screen_height // 2, min(screen_height, screen_y))
+                        
+                        # Draw a vertical line representing this terrain column
+                        pygame.draw.line(self.screen, color, (x, screen_y), (x, screen_height))
+                        
+                        # Check if this is the destination point
+                        if destination and abs(pos_x - destination[0]) < 2 and abs(pos_y - destination[1]) < 2:
+                            # Draw a red marker for the destination
+                            marker_size = max(3, int(10 * (1 - dist / max_dist)))
+                            pygame.draw.circle(self.screen, (255, 0, 0), (x, screen_y), marker_size)
+                        
+                        # Check if this is on the path
+                        if path:
+                            for path_pos in path:
+                                if abs(pos_x - path_pos[0]) < 2 and abs(pos_y - path_pos[1]) < 2:
+                                    # Draw a green marker for path points
+                                    marker_size = max(2, int(5 * (1 - dist / max_dist)))
+                                    pygame.draw.circle(self.screen, (0, 255, 0), (x, screen_y), marker_size)
+                                    break
+                
+                # Increase distance for next step
+                dist += step_size
+                
+                # Adaptive step size for performance
+                step_size = max(1, int(dist / 10))
+        
+        # Draw a simple crosshair in the center of the screen
+        crosshair_size = 10
+        crosshair_color = (255, 255, 255)
+        pygame.draw.line(self.screen, crosshair_color, 
+                         (screen_width // 2 - crosshair_size, screen_height // 2),
+                         (screen_width // 2 + crosshair_size, screen_height // 2), 2)
+        pygame.draw.line(self.screen, crosshair_color, 
+                         (screen_width // 2, screen_height // 2 - crosshair_size),
+                         (screen_width // 2, screen_height // 2 + crosshair_size), 2)
+
 
 class GUI:
     def __init__(self, width=1024, height=768, fullscreen=False):
@@ -465,6 +722,9 @@ class GUI:
         self.status_messages = []
         self.message_timeout = 3000  # Message timeout in milliseconds
         self.message_times = []
+        
+        # First-person mode
+        self.first_person_mode = False
     
     def clear_screen(self):
         """Clear the screen with a black background."""
@@ -513,7 +773,7 @@ class GUI:
             self.render_text(message, (10, y), color)
             y += 25
     
-    def render_hud(self, player_pos, elevation, autopilot_enabled):
+    def render_hud(self, player_pos, elevation, autopilot_enabled, first_person_mode=False):
         """
         Render the heads-up display.
         
@@ -521,6 +781,7 @@ class GUI:
             player_pos (tuple): Player's position (x, y)
             elevation (float): Current elevation
             autopilot_enabled (bool): Whether autopilot is enabled
+            first_person_mode (bool): Whether first-person mode is enabled
         """
         # Render player position
         pos_text = f"Position: ({player_pos[0]:.1f}, {player_pos[1]:.1f})"
@@ -536,13 +797,27 @@ class GUI:
         else:
             self.render_text("Autopilot: DISABLED", (self.width - 200, 10), (255, 0, 0))
         
-        # Render controls help
-        controls_text = "Controls: WASD=Move, K=Toggle Autopilot, Scroll=Zoom"
+        # Render view mode
+        if first_person_mode:
+            self.render_text("View: FIRST-PERSON", (self.width - 200, 30), (0, 255, 255))
+        else:
+            self.render_text("View: TOP-DOWN", (self.width - 200, 30), (255, 255, 0))
+        
+        # Render controls help appropriate for the current view mode
+        if first_person_mode:
+            controls_text = "Controls: WASD=Move, Mouse=Look, K=Toggle Autopilot, R=Toggle View"
+        else:
+            controls_text = "Controls: WASD=Move, K=Toggle Autopilot, R=Toggle View, Scroll=Zoom"
+        
         self.render_text(controls_text, (10, self.height - 50))
         
         # Render destination help
-        click_text = "Click anywhere on the terrain to set a destination point"
-        self.render_text(click_text, (10, self.height - 30), (255, 255, 0))
+        if not first_person_mode:
+            click_text = "Click anywhere on the terrain to set a destination point"
+            self.render_text(click_text, (10, self.height - 30), (255, 255, 0))
+        else:
+            jump_text = "In first-person mode, the rover can climb up to 2 blocks"
+            self.render_text(jump_text, (10, self.height - 30), (255, 255, 0))
     
     def update(self):
         """Update the display."""

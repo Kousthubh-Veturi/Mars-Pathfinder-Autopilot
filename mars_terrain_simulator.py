@@ -11,7 +11,7 @@ import os
 import time
 
 from mars_terrain.terrain import TerrainGenerator, PathFinder
-from mars_terrain.gui import GUI, Camera, Minimap, TerrainRenderer
+from mars_terrain.gui import GUI, Camera, Minimap, TerrainRenderer, FirstPersonCamera
 from mars_terrain.control import PlayerController, InputHandler
 
 def parse_args():
@@ -146,6 +146,9 @@ def main():
     # Create the camera
     camera = Camera(x=start_pos[0], y=start_pos[1], zoom=0.5)
     
+    # Create the first-person camera
+    fp_camera = FirstPersonCamera(position=start_pos, direction=0, max_elevation=args.max_elevation)
+    
     # Calculate minimap position in the upper right corner
     minimap_width = 200
     minimap_height = 200
@@ -166,11 +169,12 @@ def main():
     
     # Create the input handler
     input_handler = InputHandler(gui, controller, camera, minimap)
+    input_handler.set_first_person_camera(fp_camera)
     
     # Add initial status message
     gui.add_status_message("Welcome to Mars Terrain Simulator", (255, 255, 0))
     gui.add_status_message("Use WASD to move, K to toggle autopilot", (255, 255, 0))
-    gui.add_status_message("Click on the minimap to set destination", (255, 255, 0))
+    gui.add_status_message("Press R to toggle first-person view", (255, 255, 0))
     
     # Main simulation loop
     running = True
@@ -178,8 +182,11 @@ def main():
         # Clear the screen
         gui.clear_screen()
         
-        # Update camera
-        camera.update()
+        # Update camera (either first-person or top-down)
+        if gui.first_person_mode:
+            fp_camera.update()
+        else:
+            camera.update()
         
         # Handle user input
         if input_handler.update():
@@ -188,13 +195,30 @@ def main():
         # Update player and camera positions
         player_pos = controller.get_position()
         
-        # Update the minimap
+        # Update the minimap (always show it, even in first-person mode)
         minimap.update(player_pos, controller.path)
         
-        # Render the terrain
-        renderer.render(camera, player_pos, controller.path, controller.destination)
+        # Render the terrain (either first-person or top-down)
+        if gui.first_person_mode:
+            # Get player elevation for first-person camera height
+            player_elevation = controller.get_elevation()
+            if player_elevation < 0:
+                player_elevation = 0
+            
+            # Render in first-person mode
+            renderer.render_first_person(
+                fp_camera, 
+                player_pos, 
+                controller.direction,
+                player_elevation, 
+                controller.path, 
+                controller.destination
+            )
+        else:
+            # Render in top-down mode
+            renderer.render(camera, player_pos, controller.path, controller.destination)
         
-        # Draw the minimap
+        # Draw the minimap (always visible in both modes)
         minimap.draw(gui.screen)
         
         # Update and render HUD
@@ -209,7 +233,11 @@ def main():
                 new_pos = valid_neighbors[0]
                 controller.position = new_pos
                 camera.set_position(new_pos[0], new_pos[1])
-        gui.render_hud(player_pos, controller.get_elevation(), controller.autopilot_enabled)
+                if gui.first_person_mode:
+                    fp_camera.set_position(new_pos[0], new_pos[1], terrain)
+        
+        # Render HUD with first-person mode indication
+        gui.render_hud(player_pos, controller.get_elevation(), controller.autopilot_enabled, gui.first_person_mode)
         
         # Update the display
         gui.update()

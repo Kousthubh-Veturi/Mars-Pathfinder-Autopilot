@@ -17,10 +17,14 @@ This simulator uses a hybrid approach combining Python and C++ for optimal perfo
 - Dual control modes:
   - Manual control using WASD keys
   - Autopilot navigation (toggle with K key)
+- Dual view perspectives:
+  - Top-down view for strategic navigation
+  - First-person view for immersive exploration (toggle with R key)
 - A* pathfinding algorithm for optimal path planning
 - Chunk-based terrain generation for efficient memory usage
 - Dynamic lighting system for enhanced visuals
 - Efficient path visualization
+- Realistic rover movement with climbing capabilities in first-person mode
 
 ## Running the Simulation
 
@@ -62,11 +66,13 @@ python mars_terrain_simulator.py
 ### Controls
 
 - **WASD** - Move the rover
+- **R** - Toggle between top-down and first-person view
 - **K** - Toggle autopilot mode
-- **Mouse click on minimap** - Set destination marker
-- **Mouse wheel** - Zoom in/out
-- **Mouse drag** - Move the camera
-- **ESC** - Exit the simulation
+- **Mouse** - Look around in first-person mode (click to lock/unlock mouse)
+- **Mouse click on terrain/minimap** - Set destination marker
+- **Mouse wheel** - Zoom in/out (top-down mode only)
+- **Mouse drag** - Move the camera (top-down mode only)
+- **ESC** - Release mouse in first-person mode or exit the simulation
 
 ## Command-Line Options
 
