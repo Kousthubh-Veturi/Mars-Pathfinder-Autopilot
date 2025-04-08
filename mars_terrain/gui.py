@@ -601,25 +601,68 @@ class TerrainRenderer:
             # Draw a horizontal line of the gradient color
             pygame.draw.line(self.screen, (r, g, b), (0, y), (screen_width, y))
         
-        # Draw ground in the bottom half of the screen
-        ground_rect = pygame.Rect(0, screen_height // 2, screen_width, screen_height // 2)
-        pygame.draw.rect(self.screen, (160, 120, 80), ground_rect)
+        # Draw a more detailed horizon line
+        pygame.draw.line(self.screen, (100, 80, 60), (0, screen_height // 2), (screen_width, screen_height // 2), 2)
         
-        # Render visible terrain using raycasting
+        # Draw ground in the bottom half of the screen with a gradient for distance
+        ground_height = screen_height // 2
+        for y in range(ground_height, screen_height):
+            # Make ground darker with distance from horizon
+            distance_factor = (y - ground_height) / (screen_height - ground_height)
+            base_color = (160, 120, 80)
+            darker_color = (
+                int(base_color[0] * (1 - distance_factor * 0.5)),
+                int(base_color[1] * (1 - distance_factor * 0.5)),
+                int(base_color[2] * (1 - distance_factor * 0.5))
+            )
+            pygame.draw.line(self.screen, darker_color, (0, y), (screen_width, y))
+        
+        # Draw grid lines on ground for better depth perception
+        grid_spacing = 50
+        horizon_y = screen_height // 2
+        vanishing_point_x = screen_width // 2
+        
+        # Draw vertical grid lines (running away from viewer)
+        for x_offset in range(-10, 11, 2):
+            start_x = vanishing_point_x + x_offset * grid_spacing
+            if 0 <= start_x < screen_width:
+                # Draw lines radiating from vanishing point
+                for i in range(1, 6):
+                    # Further lines are drawn thinner and lighter
+                    line_width = max(1, 3 - i // 2)
+                    intensity = max(30, 100 - i * 15)
+                    grid_color = (intensity, intensity, intensity)
+                    
+                    # Calculate endpoints based on distance
+                    distance_factor = i / 5
+                    end_x = vanishing_point_x + (start_x - vanishing_point_x) * (1 + distance_factor * 5)
+                    end_y = horizon_y + (screen_height - horizon_y) * distance_factor
+                    
+                    # Only draw if end point is on screen
+                    if 0 <= end_x < screen_width:
+                        pygame.draw.line(self.screen, grid_color, (start_x, horizon_y), (end_x, end_y), line_width)
+        
+        # Render visible terrain using improved raycasting
         ray_step = 2  # Number of pixels to skip between rays for performance
+        
+        # Pre-compute some constants
+        max_dist = camera.view_distance
+        cam_x, cam_y = camera.position
+        
+        # Create a list to store rendered columns for post-processing
+        terrain_columns = []
         
         for x in range(0, screen_width, ray_step):
             # Calculate ray direction for this column
             ray_dir = camera.get_view_ray(x, screen_height // 2, screen_width, screen_height)
+            ray_x, ray_y = ray_dir
             
             # Cast the ray to find the first terrain intersection
-            max_dist = camera.view_distance
             step_size = 1
             dist = 0
             hit = False
-            
-            cam_x, cam_y = camera.position
-            ray_x, ray_y = ray_dir
+            hit_pos = None
+            hit_elevation = None
             
             while dist < max_dist and not hit:
                 # Calculate current position along the ray
@@ -632,60 +675,164 @@ class TerrainRenderer:
                     elevation = self.terrain.get_elevation(pos_x, pos_y)
                     
                     # Check if the ray hits the terrain
-                    if elevation >= camera.height - 2:  # Can see 2 blocks below current height
+                    if elevation >= 0 and elevation >= camera.height - 3:  # Can see 3 blocks below current height
                         hit = True
-                        
-                        # Calculate the color based on distance (for fog effect)
-                        color = TerrainColors.get_color(elevation, self.terrain.max_elevation)
-                        
-                        # Apply distance fog
-                        fog_factor = 1.0 - min(1.0, dist / max_dist)
-                        r = int(color[0] * fog_factor)
-                        g = int(color[1] * fog_factor)
-                        b = int(color[2] * fog_factor)
-                        color = (r, g, b)
-                        
-                        # Calculate perceived height based on elevation difference
-                        height_diff = elevation - camera.height
-                        screen_height_factor = -height_diff / 20 + 0.5  # 0 = horizon, 1 = bottom of screen
-                        
-                        # Map to screen coordinates
-                        screen_y = int(screen_height * (0.5 + screen_height_factor / 2))
-                        screen_y = max(screen_height // 2, min(screen_height, screen_y))
-                        
-                        # Draw a vertical line representing this terrain column
-                        pygame.draw.line(self.screen, color, (x, screen_y), (x, screen_height))
-                        
-                        # Check if this is the destination point
-                        if destination and abs(pos_x - destination[0]) < 2 and abs(pos_y - destination[1]) < 2:
-                            # Draw a red marker for the destination
-                            marker_size = max(3, int(10 * (1 - dist / max_dist)))
-                            pygame.draw.circle(self.screen, (255, 0, 0), (x, screen_y), marker_size)
-                        
-                        # Check if this is on the path
-                        if path:
-                            for path_pos in path:
-                                if abs(pos_x - path_pos[0]) < 2 and abs(pos_y - path_pos[1]) < 2:
-                                    # Draw a green marker for path points
-                                    marker_size = max(2, int(5 * (1 - dist / max_dist)))
-                                    pygame.draw.circle(self.screen, (0, 255, 0), (x, screen_y), marker_size)
-                                    break
+                        hit_pos = (pos_x, pos_y)
+                        hit_elevation = elevation
                 
                 # Increase distance for next step
                 dist += step_size
                 
                 # Adaptive step size for performance
                 step_size = max(1, int(dist / 10))
+            
+            if hit:
+                # Store hit information for post-processing
+                terrain_columns.append((x, dist, hit_pos, hit_elevation))
         
-        # Draw a simple crosshair in the center of the screen
-        crosshair_size = 10
+        # Sort columns by distance for correct rendering
+        terrain_columns.sort(key=lambda col: col[1], reverse=True)
+        
+        # Post-process and render terrain columns
+        for x, dist, hit_pos, elevation in terrain_columns:
+            # Calculate perceived height based on elevation difference
+            height_diff = elevation - camera.height
+            
+            # More extreme height rendering for better visibility
+            screen_height_factor = -height_diff / 10 + 0.5  # 0 = horizon, 1 = bottom of screen
+            
+            # Map to screen coordinates
+            screen_y = int(screen_height * (0.5 + screen_height_factor / 2))
+            screen_y = max(screen_height // 2, min(screen_height, screen_y))
+            
+            # Calculate the block width based on distance
+            block_width = max(ray_step, int(ray_step * (1 + (max_dist - dist) / max_dist * 2)))
+            
+            # Get base color for this elevation
+            base_color = TerrainColors.get_color(elevation, self.terrain.max_elevation)
+            
+            # Apply distance fog
+            fog_factor = 1.0 - min(0.8, dist / max_dist)
+            shaded_color = (
+                int(base_color[0] * fog_factor),
+                int(base_color[1] * fog_factor),
+                int(base_color[2] * fog_factor)
+            )
+            
+            # Apply terrain height shading for better 3D appearance
+            if height_diff > 0:
+                # Higher terrain is lighter
+                brightness = min(1.2, 1.0 + height_diff / 50)
+                shaded_color = (
+                    min(255, int(shaded_color[0] * brightness)),
+                    min(255, int(shaded_color[1] * brightness)),
+                    min(255, int(shaded_color[2] * brightness))
+                )
+            elif height_diff < 0:
+                # Lower terrain is darker
+                darkness = max(0.7, 1.0 + height_diff / 30)
+                shaded_color = (
+                    max(0, int(shaded_color[0] * darkness)),
+                    max(0, int(shaded_color[1] * darkness)),
+                    max(0, int(shaded_color[2] * darkness))
+                )
+            
+            # Draw a vertical column for this terrain slice
+            # Use a rectangle instead of a line for more continuous appearance
+            terrain_rect = pygame.Rect(x, screen_y, block_width, screen_height - screen_y)
+            pygame.draw.rect(self.screen, shaded_color, terrain_rect)
+            
+            # Add a subtle highlight at the top edge of the terrain
+            pygame.draw.line(self.screen, (
+                min(255, int(shaded_color[0] * 1.2)),
+                min(255, int(shaded_color[1] * 1.2)),
+                min(255, int(shaded_color[2] * 1.2))
+            ), (x, screen_y), (x + block_width, screen_y), 2)
+            
+            # Check if this is the destination point and draw a marker
+            if destination and hit_pos:
+                pos_x, pos_y = hit_pos
+                if abs(pos_x - destination[0]) < 3 and abs(pos_y - destination[1]) < 3:
+                    # Draw a more visible red marker for the destination
+                    marker_size = max(5, int(15 * (1 - dist / max_dist)))
+                    marker_x = x + block_width // 2
+                    pygame.draw.circle(self.screen, (255, 0, 0), (marker_x, screen_y), marker_size)
+                    # Add an X inside the circle
+                    pygame.draw.line(self.screen, (255, 255, 255), 
+                                    (marker_x - marker_size/2, screen_y - marker_size/2),
+                                    (marker_x + marker_size/2, screen_y + marker_size/2), 2)
+                    pygame.draw.line(self.screen, (255, 255, 255), 
+                                    (marker_x - marker_size/2, screen_y + marker_size/2),
+                                    (marker_x + marker_size/2, screen_y - marker_size/2), 2)
+            
+            # Check if this is on the path
+            if path and hit_pos:
+                pos_x, pos_y = hit_pos
+                for path_pos in path:
+                    if abs(pos_x - path_pos[0]) < 3 and abs(pos_y - path_pos[1]) < 3:
+                        # Draw a more visible green marker for path points
+                        marker_size = max(3, int(8 * (1 - dist / max_dist)))
+                        marker_x = x + block_width // 2
+                        pygame.draw.circle(self.screen, (0, 255, 0), (marker_x, screen_y), marker_size)
+                        break
+        
+        # Draw a clearer crosshair in the center of the screen
+        crosshair_size = 12
+        crosshair_thickness = 2
         crosshair_color = (255, 255, 255)
+        crosshair_center = (screen_width // 2, screen_height // 2)
+        
+        # Outer circle
+        pygame.draw.circle(self.screen, crosshair_color, crosshair_center, crosshair_size, 1)
+        
+        # Inner dot
+        pygame.draw.circle(self.screen, crosshair_color, crosshair_center, 2)
+        
+        # Crosshair lines
         pygame.draw.line(self.screen, crosshair_color, 
-                         (screen_width // 2 - crosshair_size, screen_height // 2),
-                         (screen_width // 2 + crosshair_size, screen_height // 2), 2)
+                        (crosshair_center[0] - crosshair_size, crosshair_center[1]),
+                        (crosshair_center[0] - 4, crosshair_center[1]), crosshair_thickness)
         pygame.draw.line(self.screen, crosshair_color, 
-                         (screen_width // 2, screen_height // 2 - crosshair_size),
-                         (screen_width // 2, screen_height // 2 + crosshair_size), 2)
+                        (crosshair_center[0] + 4, crosshair_center[1]),
+                        (crosshair_center[0] + crosshair_size, crosshair_center[1]), crosshair_thickness)
+        pygame.draw.line(self.screen, crosshair_color, 
+                        (crosshair_center[0], crosshair_center[1] - crosshair_size),
+                        (crosshair_center[0], crosshair_center[1] - 4), crosshair_thickness)
+        pygame.draw.line(self.screen, crosshair_color, 
+                        (crosshair_center[0], crosshair_center[1] + 4),
+                        (crosshair_center[0], crosshair_center[1] + crosshair_size), crosshair_thickness)
+        
+        # Draw elevation indicator on the left side
+        elevation_indicator_width = 20
+        elevation_indicator_height = 150
+        elevation_x = 20
+        elevation_y = (screen_height - elevation_indicator_height) // 2
+        
+        # Draw background
+        pygame.draw.rect(self.screen, (30, 30, 30), 
+                        (elevation_x, elevation_y, elevation_indicator_width, elevation_indicator_height))
+        
+        # Draw current elevation indicator
+        if self.terrain.max_elevation > 0:
+            normalized_elevation = min(1.0, max(0.0, player_height / self.terrain.max_elevation))
+            indicator_height = int(elevation_indicator_height * normalized_elevation)
+            indicator_y = elevation_y + elevation_indicator_height - indicator_height
+            
+            # Draw filled bar
+            pygame.draw.rect(self.screen, (0, 200, 0), 
+                            (elevation_x, indicator_y, elevation_indicator_width, indicator_height))
+            
+            # Draw marker for current position
+            pygame.draw.rect(self.screen, (255, 255, 255), 
+                            (elevation_x, indicator_y, elevation_indicator_width, 3))
+        
+        # Label the elevation bar
+        elevation_label = "Elevation"
+        font = pygame.font.SysFont("Arial", 18)
+        label_surface = font.render(elevation_label, True, (255, 255, 255))
+        self.screen.blit(label_surface, 
+                        (elevation_x + elevation_indicator_width // 2 - label_surface.get_width() // 2, 
+                        elevation_y + elevation_indicator_height + 5))
 
 
 class GUI:
